@@ -1,0 +1,60 @@
+name: Build Android App Bundle Smart
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Unzip project code
+        run: |
+          unzip -o direct_chat_unsaved.zip -d extracted_project
+          PUBSPEC_PATH=$(find extracted_project -name "pubspec.yaml" -type f | head -n 1)
+          PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
+          echo "Found project at: $PROJECT_DIR"
+          cp -rn $PROJECT_DIR/* .
+
+      - name: Upgrade Gradle & AGP Versions
+        run: |
+          # 1. Update Android Gradle Plugin Version to 8.9.1
+          find android/ -type f \( -name "build.gradle" -o -name "settings.gradle" -o -name "build.gradle.kts" -o -name "settings.gradle.kts" \) -exec sed -i 's/8\.7\.0/8.9.1/g' {} +
+          
+          # 2. Update Gradle Wrapper Version to 8.11.1
+          find android/gradle/wrapper/ -type f -name "gradle-wrapper.properties" -exec sed -i 's/gradle-.*-all\.zip/gradle-8.11.1-all.zip/g' {} +
+          find android/gradle/wrapper/ -type f -name "gradle-wrapper.properties" -exec sed -i 's/gradle-.*-bin\.zip/gradle-8.11.1-bin.zip/g' {} +
+
+      - name: Make Gradlew Executable
+        run: |
+          if [ -f "android/gradlew" ]; then
+            chmod +x android/gradlew
+          fi
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build AAB
+        run: flutter build appbundle --debug
+
+      - name: Upload AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: build/app/outputs/bundle/debug/app-debug.aab
