@@ -1,0 +1,74 @@
+name: Build Signed Release Android App Bundle
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Unzip project code
+        run: |
+          unzip -o direct_chat_unsaved.zip -d extracted_project
+          PUBSPEC_PATH=$(find extracted_project -name "pubspec.yaml" -type f | head -n 1)
+          PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
+          echo "Found project at: $PROJECT_DIR"
+          cp -rn $PROJECT_DIR/* .
+
+      - name: Ensure app directory exists
+        run: mkdir -p android/app
+
+      - name: Auto-Create key.properties File
+        run: |
+          echo "storePassword=myappsecretpass" > key.properties
+          echo "keyPassword=myappsecretpass" >> key.properties
+          echo "keyAlias=uploadkey" >> key.properties
+          echo "storeFile=release-key.jks" >> key.properties
+          cp key.properties android/
+
+      - name: Auto-Generate Keystore File inside android/app
+        run: |
+          keytool -genkey -v -keystore android/app/release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias uploadkey -dname "CN=Developer, OU=Dev, O=App, L=City, S=State, C=BD" -storepass myappsecretpass -keypass myappsecretpass
+
+      - name: Upgrade Gradle, AGP & Kotlin Versions
+        run: |
+          find android/ -type f \( -name "build.gradle" -o -name "settings.gradle" -o -name "build.gradle.kts" -o -name "settings.gradle.kts" \) -exec sed -i 's/8\.7\.0/8.9.1/g' {} +
+          find android/ -type f \( -name "build.gradle" -o -name "settings.gradle" -o -name "build.gradle.kts" -o -name "settings.gradle.kts" \) -exec sed -i 's/1\.9\.[0-9]*/2.1.0/g' {} +
+          find android/ -type f \( -name "build.gradle" -o -name "settings.gradle" -o -name "build.gradle.kts" -o -name "settings.gradle.kts" \) -exec sed -i 's/2\.0\.[0-9]*/2.1.0/g' {} +
+          find android/gradle/wrapper/ -type f -name "gradle-wrapper.properties" -exec sed -i 's/gradle-.*-all\.zip/gradle-8.11.1-all.zip/g' {} +
+          find android/gradle/wrapper/ -type f -name "gradle-wrapper.properties" -exec sed -i 's/gradle-.*-bin\.zip/gradle-8.11.1-bin.zip/g' {} +
+
+      - name: Make Gradlew Executable
+        run: |
+          if [ -f "android/gradlew" ]; then
+            chmod +x android/gradlew
+          fi
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build Release AAB
+        run: flutter build appbundle --release --android-skip-build-dependency-validation
+
+      - name: Upload AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-signed-aab
+          path: build/app/outputs/bundle/release/app-release.aab
